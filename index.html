@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="he" dir="rtl" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@500;700&display=swap" rel="stylesheet" />
+    <title>שיר</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main id="app" class="app" aria-live="polite">
+      <div id="splash" class="splash" aria-hidden="false">
+        <div class="splashInner">
+          <div class="splashTitle">שירה לבוקר</div>
+        </div>
+      </div>
+      <div id="content" class="content" tabindex="-1">
+        <header class="meta">
+          <div id="title" class="title"></div>
+          <div id="author" class="author"></div>
+        </header>
+
+        <article id="poem" class="poem"></article>
+
+        <footer class="credit">
+          <a id="sourceLink" class="source" href="#" target="_blank" rel="noreferrer noopener">פרויקט בן־יהודה</a>
+        </footer>
+      </div>
+
+      <div id="controls" class="controls" aria-hidden="true">
+        <div class="controlsRow controlsRowSecondary">
+          <button id="themeBtn" class="btnSmall" type="button">מצב כהה</button>
+          <button id="langBtn" class="btnSmall" type="button" disabled title="אנגלית תתווסף בהמשך">עברית</button>
+        </div>
+      </div>
+
+      <div id="status" class="status" aria-hidden="true"></div>
+    </main>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>
+
