@@ -7,6 +7,10 @@ const BEN_YEHUDA_API_KEY = "f456e85106503870c542590768e1b218ed9b5218b178e9157593
 const API_BASE = "https://benyehuda.org";
 const LS_KEY = "shir.state.v1";
 
+// Check for debug mode in URL params
+const urlParams = new URLSearchParams(window.location.search);
+const DEBUG_MODE = urlParams.get("debug") === "1";
+
 const el = {
   root: document.documentElement,
   app: document.getElementById("app"),
@@ -19,7 +23,7 @@ const el = {
   themeBtn: document.getElementById("themeBtn"),
 };
 
-/** @typedef {{id:number,title:string,author:string,url:string,snippet:string}} PoemItem */
+/** @typedef {{id:number,title:string,author:string,url:string,snippet?:string,downloadUrl?:string,text?:string}} PoemItem */
 
 let state = {
   theme: "dark", // "light" | "dark"
@@ -73,7 +77,11 @@ function saveState() {
   const ids = state.historyIds.slice(-60);
   const itemsById = {};
   for (const id of ids) {
-    if (state.itemsById[id]) itemsById[id] = state.itemsById[id];
+    // Do NOT persist full text into localStorage (too large / can exceed quota).
+    const item = state.itemsById[id];
+    if (!item) continue;
+    const { text, ...rest } = item;
+    itemsById[id] = rest;
   }
 
   const payload = {
@@ -126,44 +134,143 @@ function showStatus(msg) {
   }, 1500);
 }
 
-function normalizeSnippet(snippet) {
-  if (!snippet) return "";
-  // Ben Yehuda snippet is plaintext; keep it readable.
-  return String(snippet).replace(/\s+\n/g, "\n").trim();
+function normalizeText(text) {
+  if (!text) return "";
+  // Text/snippet are plaintext; keep it readable.
+  return String(text).replace(/\s+\n/g, "\n").trim();
 }
 
 function render(item) {
   el.title.textContent = item.title || "";
   el.author.textContent = item.author || "";
-  el.poem.textContent = normalizeSnippet(item.snippet) || "…";
+  el.poem.textContent = normalizeText(item.text || item.snippet) || "…";
   el.sourceLink.href = item.url || "https://benyehuda.org";
   // Put focus on content for screen readers (without scrolling).
   el.poem.scrollTop = 0;
 }
 
+async function fetchTextFromUrl(downloadUrl) {
+  if (DEBUG_MODE) {
+    console.log("[Download Request]", { url: downloadUrl });
+  }
+  const res = await fetch(downloadUrl, { method: "GET" });
+  const body = await res.text().catch(() => "");
+  if (DEBUG_MODE) {
+    console.log("[Download Response]", {
+      url: downloadUrl,
+      status: res.status,
+      statusText: res.statusText,
+      length: body.length,
+    });
+  }
+  if (!res.ok) throw new Error(`Download ${res.status}: ${body.slice(0, 200)}`);
+  return body;
+}
+
+async function ensureFullText(id) {
+  const cached = state.itemsById[id];
+  if (!cached) return false;
+  if (cached.text) return false;
+
+  try {
+    const m = await apiGet(
+      `/api/v1/texts/${id}?key=${encodeURIComponent(BEN_YEHUDA_API_KEY)}&view=basic&file_format=txt&snippet=false`
+    );
+    const downloadUrl = m?.download_url || m?.downloadUrl;
+    if (downloadUrl) cached.downloadUrl = downloadUrl;
+    if (!downloadUrl) return false;
+
+    const fullText = await fetchTextFromUrl(downloadUrl);
+    cached.text = normalizeText(fullText);
+    // Persist metadata only (saveState strips `text`).
+    saveState();
+    return true;
+  } catch (e) {
+    if (DEBUG_MODE) console.warn("[FullText] failed", e);
+    return false;
+  }
+}
+
 async function apiPost(path, body) {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const url = `${API_BASE}${path}`;
+  const options = {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`API ${res.status}: ${text.slice(0, 200)}`);
+  };
+  
+  if (DEBUG_MODE) {
+    console.log("[API Request]", {
+      method: "POST",
+      url,
+      body: body,
+    });
   }
-  return res.json();
+  
+  const res = await fetch(url, options);
+  const responseText = await res.text().catch(() => "");
+  
+  if (DEBUG_MODE) {
+    console.log("[API Response]", {
+      method: "POST",
+      url,
+      status: res.status,
+      statusText: res.statusText,
+      headers: Object.fromEntries(res.headers.entries()),
+      body: responseText,
+    });
+  }
+  
+  if (!res.ok) {
+    throw new Error(`API ${res.status}: ${responseText.slice(0, 200)}`);
+  }
+  
+  const json = JSON.parse(responseText);
+  if (DEBUG_MODE) {
+    console.log("[API Response JSON]", json);
+  }
+  
+  return json;
 }
 
 async function apiGet(path) {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const url = `${API_BASE}${path}`;
+  const options = {
     method: "GET",
     headers: { accept: "application/json" },
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`API ${res.status}: ${text.slice(0, 200)}`);
+  };
+  
+  if (DEBUG_MODE) {
+    console.log("[API Request]", {
+      method: "GET",
+      url,
+    });
   }
-  return res.json();
+  
+  const res = await fetch(url, options);
+  const responseText = await res.text().catch(() => "");
+  
+  if (DEBUG_MODE) {
+    console.log("[API Response]", {
+      method: "GET",
+      url,
+      status: res.status,
+      statusText: res.statusText,
+      headers: Object.fromEntries(res.headers.entries()),
+      body: responseText,
+    });
+  }
+  
+  if (!res.ok) {
+    throw new Error(`API ${res.status}: ${responseText.slice(0, 200)}`);
+  }
+  
+  const json = JSON.parse(responseText);
+  if (DEBUG_MODE) {
+    console.log("[API Response JSON]", json);
+  }
+  
+  return json;
 }
 
 async function fetchSearchPage() {
@@ -225,7 +332,10 @@ async function ensureQueue(min = 10) {
 }
 
 async function hydrateItems(ids) {
-  const need = ids.filter((id) => !state.itemsById[id] || !state.itemsById[id].snippet);
+  const need = ids.filter((id) => {
+    const item = state.itemsById[id];
+    return !item || (!item.snippet && !item.text);
+  });
   if (need.length === 0) return;
 
   // Batch endpoint: POST /api/v1/texts/batch
@@ -264,7 +374,9 @@ async function showCurrent() {
   if (!state.itemsById[id] || !state.itemsById[id].snippet) {
     // Fallback: try the single item endpoint.
     try {
-      const m = await apiGet(`/api/v1/texts/${id}?key=${encodeURIComponent(BEN_YEHUDA_API_KEY)}&view=basic&file_format=html&snippet=true`);
+      const m = await apiGet(
+        `/api/v1/texts/${id}?key=${encodeURIComponent(BEN_YEHUDA_API_KEY)}&view=basic&file_format=txt&snippet=true`
+      );
       const meta = m?.metadata || {};
       state.itemsById[id] = {
         id,
@@ -281,6 +393,14 @@ async function showCurrent() {
 
   const item = state.itemsById[id];
   if (item) render(item);
+
+  // Fetch full text in the background, then re-render if still on same poem.
+  void ensureFullText(id).then((updated) => {
+    if (!updated) return;
+    if (currentId() !== id) return;
+    const updatedItem = state.itemsById[id];
+    if (updatedItem) render(updatedItem);
+  });
 }
 
 async function goNext() {

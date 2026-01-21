@@ -63,7 +63,7 @@ body {
   color: #f7f7fb;
   z-index: 50;
   opacity: 1;
-  transition: opacity 380ms ease;
+  transition: opacity 720ms ease;
   overflow: hidden;
 }
 
@@ -165,7 +165,10 @@ html[data-splash="hidden"] .splash {
   font-size: clamp(22px, 4.6vw + 10px, 44px);
   line-height: 1.5;
   overflow: auto;
-  padding-bottom: 6px;
+  padding-bottom: 10px;
+  background: linear-gradient(180deg, rgba(245, 157, 101, 0.04) 0%, transparent 26%, transparent 100%);
+  border-radius: 14px;
+  padding-inline: 6px;
 }
 
 .credit {
@@ -192,7 +195,7 @@ html[data-splash="hidden"] .splash {
   right: max(10px, env(safe-area-inset-right));
   bottom: max(10px, env(safe-area-inset-bottom));
   padding: 10px 10px 12px;
-  border: 1px solid var(--hairline);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--hairline));
   border-radius: 16px;
   background: var(--panel);
   backdrop-filter: blur(10px);
