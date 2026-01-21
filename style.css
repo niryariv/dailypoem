@@ -176,6 +176,10 @@ html[data-splash="hidden"] .splash {
   color: var(--muted);
   border-top: 1px solid var(--hairline);
   padding-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
 .source {
@@ -183,6 +187,15 @@ html[data-splash="hidden"] .splash {
   text-decoration: none;
   border-bottom: 1px solid var(--hairline);
   padding-bottom: 2px;
+}
+
+.creditDivider {
+  opacity: 0.6;
+}
+
+.version {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
 }
 
 .source:active {
@@ -260,4 +273,3 @@ html[data-status="visible"] .status {
   opacity: 1;
   transform: translateY(0);
 }
-

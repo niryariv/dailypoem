@@ -3,6 +3,7 @@
 // NOTE: Per your choice, the API key is intentionally present in frontend code.
 // You can replace it, or load it differently if you later add a proxy/backend.
 const BEN_YEHUDA_API_KEY = "f456e85106503870c542590768e1b218ed9b5218b178e9157593c6e8dc1f877d";
+const APP_VERSION = "v1.1.0";
 
 const API_BASE = "https://benyehuda.org";
 const LS_KEY = "shir.state.v1";
@@ -19,6 +20,7 @@ const el = {
   author: document.getElementById("author"),
   poem: document.getElementById("poem"),
   sourceLink: document.getElementById("sourceLink"),
+  version: document.getElementById("appVersion"),
   status: document.getElementById("status"),
   themeBtn: document.getElementById("themeBtn"),
 };
@@ -144,7 +146,6 @@ function render(item) {
   el.title.textContent = item.title || "";
   el.author.textContent = item.author || "";
   el.poem.textContent = normalizeText(item.text || item.snippet) || "…";
-  el.sourceLink.href = item.url || "https://benyehuda.org";
   // Put focus on content for screen readers (without scrolling).
   el.poem.scrollTop = 0;
 }
@@ -539,6 +540,7 @@ async function init() {
   hideControls();
   setupButtons();
   setupSwipe();
+  if (el.version) el.version.textContent = APP_VERSION;
 
   el.root.dataset.splash = "visible";
   const splashDelay = new Promise((resolve) => setTimeout(resolve, 3000));
@@ -570,4 +572,3 @@ async function init() {
 }
 
 void init();
-

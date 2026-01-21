@@ -1,6 +1,6 @@
 /* Minimal PWA service worker: cache app shell; runtime cache Ben Yehuda responses (best-effort). */
 
-const CACHE_VERSION = "v1";
+const CACHE_VERSION = "v1.1.0";
 const SHELL_CACHE = `shir-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `shir-runtime-${CACHE_VERSION}`;
 
@@ -74,4 +74,3 @@ self.addEventListener("fetch", (event) => {
     );
   }
 });
-
