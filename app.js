@@ -23,6 +23,7 @@ const el = {
   version: document.getElementById("appVersion"),
   status: document.getElementById("status"),
   themeBtn: document.getElementById("themeBtn"),
+  installBtn: document.getElementById("installBtn"),
 };
 
 /** @typedef {{id:number,title:string,author:string,url:string,snippet?:string,downloadUrl?:string,text?:string}} PoemItem */
@@ -42,6 +43,7 @@ let state = {
 
 let controlsHideTimer = null;
 let splashHidden = false;
+let installPromptEvent = null;
 
 function safeJsonParse(str) {
   try {
@@ -101,7 +103,13 @@ function saveState() {
 function setTheme(theme) {
   state.theme = theme;
   el.root.dataset.theme = theme;
-  el.themeBtn.textContent = theme === "dark" ? "מצב בהיר" : "מצב כהה";
+  const nextLabel = theme === "dark" ? "מצב בהיר" : "מצב כהה";
+  const nextIcon = theme === "dark" ? "☀️" : "🌙";
+  const label = el.themeBtn?.querySelector(".btnLabel");
+  const icon = el.themeBtn?.querySelector(".btnIcon");
+  if (label) label.textContent = nextLabel;
+  if (icon) icon.textContent = nextIcon;
+  if (el.themeBtn) el.themeBtn.setAttribute("aria-label", nextLabel);
   const metaTheme = document.querySelector('meta[name="theme-color"]');
   if (metaTheme) metaTheme.setAttribute("content", theme === "dark" ? "#0a0a0a" : "#ffffff");
   saveState();
@@ -512,6 +520,17 @@ function setupButtons() {
     showControls();
   });
 
+  el.installBtn?.addEventListener("click", async () => {
+    if (!installPromptEvent) return;
+    installPromptEvent.prompt();
+    const choice = await installPromptEvent.userChoice;
+    if (choice?.outcome === "accepted") {
+      showStatus("התווסף למסך הבית");
+    }
+    installPromptEvent = null;
+    if (el.installBtn) el.installBtn.hidden = true;
+  });
+
   // Tap logic:
   // - left edge: next (consistent with swipe-left)
   // - right edge: previous
@@ -541,6 +560,18 @@ async function init() {
   setupButtons();
   setupSwipe();
   if (el.version) el.version.textContent = APP_VERSION;
+
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    installPromptEvent = event;
+    if (el.installBtn) el.installBtn.hidden = false;
+  });
+
+  window.addEventListener("appinstalled", () => {
+    installPromptEvent = null;
+    if (el.installBtn) el.installBtn.hidden = true;
+    showStatus("האפליקציה הותקנה");
+  });
 
   el.root.dataset.splash = "visible";
   const splashDelay = new Promise((resolve) => setTimeout(resolve, 3000));
