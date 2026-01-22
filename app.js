@@ -4,6 +4,10 @@
 // You can replace it, or load it differently if you later add a proxy/backend.
 const BEN_YEHUDA_API_KEY = "f456e85106503870c542590768e1b218ed9b5218b178e9157593c6e8dc1f877d";
 const APP_VERSION = "v1.2.0";
+const STORAGE_KEY = "shir.state.v1";
+const STORAGE_VERSION = 1;
+const STORAGE_MAX_HISTORY = 40;
+const STORAGE_MAX_QUEUE = 80;
 
 const API_BASE = "https://benyehuda.org";
 const URL_PARAM_ID = "id";
@@ -45,6 +49,87 @@ let state = {
 let controlsHideTimer = null;
 let splashHidden = false;
 let installPromptEvent = null;
+let persistTimer = null;
+
+function schedulePersist() {
+  if (persistTimer) window.clearTimeout(persistTimer);
+  persistTimer = window.setTimeout(() => {
+    persistTimer = null;
+    persistState();
+  }, 250);
+}
+
+function pickCachedItems(ids) {
+  const picked = /** @type {Record<number, PoemItem>} */ ({});
+  for (const id of ids) {
+    const item = state.itemsById[id];
+    if (item) picked[id] = item;
+  }
+  return picked;
+}
+
+function persistState() {
+  if (!window.localStorage) return;
+  const historyIds = state.historyIds.slice(-STORAGE_MAX_HISTORY);
+  const queueIds = state.queueIds.slice(0, STORAGE_MAX_QUEUE);
+  const keepIds = Array.from(new Set([...historyIds, ...queueIds]));
+  const payload = {
+    v: STORAGE_VERSION,
+    theme: state.theme,
+    historyIds,
+    pointer: Math.min(state.pointer, historyIds.length - 1),
+    queueIds,
+    searchAfter: state.searchAfter,
+    itemsById: pickCachedItems(keepIds),
+  };
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  } catch (e) {
+    if (DEBUG_MODE) console.warn("Persist failed", e);
+  }
+}
+
+function hydrateStateFromStorage() {
+  if (!window.localStorage) return;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (!data || data.v !== STORAGE_VERSION) return;
+    if (data.theme === "light" || data.theme === "dark") {
+      state.theme = data.theme;
+    }
+    if (Array.isArray(data.historyIds)) {
+      state.historyIds = data.historyIds.filter(Number.isInteger);
+      state.pointer = Number.isInteger(data.pointer) ? data.pointer : state.historyIds.length - 1;
+    }
+    if (Array.isArray(data.queueIds)) {
+      state.queueIds = data.queueIds.filter(Number.isInteger);
+    }
+    if (Array.isArray(data.searchAfter) || data.searchAfter === null) {
+      state.searchAfter = data.searchAfter;
+    }
+    if (data.itemsById && typeof data.itemsById === "object") {
+      const restored = /** @type {Record<number, PoemItem>} */ ({});
+      for (const [key, value] of Object.entries(data.itemsById)) {
+        const id = Number(key);
+        if (!Number.isInteger(id) || !value) continue;
+        restored[id] = {
+          id,
+          title: value.title || "",
+          author: value.author || "",
+          url: value.url || "",
+          snippet: value.snippet || "",
+          downloadUrl: value.downloadUrl,
+          text: value.text,
+        };
+      }
+      state.itemsById = restored;
+    }
+  } catch (e) {
+    if (DEBUG_MODE) console.warn("Hydrate state failed", e);
+  }
+}
 
 function setTheme(theme) {
   state.theme = theme;
@@ -58,6 +143,7 @@ function setTheme(theme) {
   if (el.themeBtn) el.themeBtn.setAttribute("aria-label", nextLabel);
   const metaTheme = document.querySelector('meta[name="theme-color"]');
   if (metaTheme) metaTheme.setAttribute("content", theme === "dark" ? "#0a0a0a" : "#ffffff");
+  schedulePersist();
 }
 
 function showControls() {
@@ -229,8 +315,9 @@ async function apiGet(path) {
   return json;
 }
 
-async function fetchSearchPage() {
+async function fetchSearchPage(options = {}) {
   // Search endpoint supports pagination via next_page_search_after.
+  const { discard = false } = options;
   const body = {
     key: BEN_YEHUDA_API_KEY,
     view: "basic",
@@ -247,32 +334,35 @@ async function fetchSearchPage() {
   const data = Array.isArray(page?.data) ? page.data : [];
 
   // Collect IDs; also opportunistically cache snippet/title/author/url from the search response.
-  for (const m of data) {
-    const id = m?.id;
-    const meta = m?.metadata || {};
-    if (!Number.isInteger(id)) continue;
+  if (!discard) {
+    for (const m of data) {
+      const id = m?.id;
+      const meta = m?.metadata || {};
+      if (!Number.isInteger(id)) continue;
 
-    state.queueIds.push(id);
-    if (!state.itemsById[id]) {
-      state.itemsById[id] = {
-        id,
-        title: meta?.title || "",
-        author: meta?.author_string || "",
-        url: m?.url || "",
-        snippet: m?.snippet || "",
-      };
-    } else {
-      // Fill missing fields if we already had it.
-      state.itemsById[id].title ||= meta?.title || "";
-      state.itemsById[id].author ||= meta?.author_string || "";
-      state.itemsById[id].url ||= m?.url || "";
-      state.itemsById[id].snippet ||= m?.snippet || "";
+      state.queueIds.push(id);
+      if (!state.itemsById[id]) {
+        state.itemsById[id] = {
+          id,
+          title: meta?.title || "",
+          author: meta?.author_string || "",
+          url: m?.url || "",
+          snippet: m?.snippet || "",
+        };
+      } else {
+        // Fill missing fields if we already had it.
+        state.itemsById[id].title ||= meta?.title || "";
+        state.itemsById[id].author ||= meta?.author_string || "";
+        state.itemsById[id].url ||= m?.url || "";
+        state.itemsById[id].snippet ||= m?.snippet || "";
+      }
     }
   }
 
   state.searchAfter = page?.next_page_search_after ?? null;
   // If we reached the end, wrap around.
   if (!state.searchAfter) state.searchAfter = null;
+  schedulePersist();
 }
 
 async function ensureQueue(min = 10) {
@@ -284,6 +374,7 @@ async function ensureQueue(min = 10) {
     const j = Math.floor(Math.random() * (i + 1));
     [state.queueIds[i], state.queueIds[j]] = [state.queueIds[j], state.queueIds[i]];
   }
+  schedulePersist();
 }
 
 async function hydrateItems(ids) {
@@ -315,6 +406,7 @@ async function hydrateItems(ids) {
       snippet: m?.snippet || "",
     };
   }
+  schedulePersist();
 }
 
 function currentId() {
@@ -352,6 +444,7 @@ function updateHistoryStack(id, mode = "push") {
       state.pointer = state.historyIds.length - 1;
     }
   }
+  schedulePersist();
 }
 
 function setUrlForPoem(id, mode = "push") {
@@ -420,6 +513,7 @@ async function goNext(mode = "push") {
       }
     }
     if (!nextId) throw new Error("No candidates");
+    schedulePersist();
 
     // Ensure we have data (snippet usually comes from search already).
     if (!state.itemsById[nextId] || !state.itemsById[nextId].snippet) {
@@ -547,6 +641,7 @@ function setupButtons() {
 }
 
 async function init() {
+  hydrateStateFromStorage();
   setTheme(state.theme);
   hideControls();
   setupButtons();
@@ -570,6 +665,13 @@ async function init() {
 
   const loadPoem = (async () => {
     const id = getIdFromUrl();
+    const hasStoredQueue = state.queueIds.length > 0 || state.searchAfter;
+    if (!hasStoredQueue && !id) {
+      const skips = Math.floor(Math.random() * 6);
+      for (let i = 0; i < skips; i++) {
+        await fetchSearchPage({ discard: true });
+      }
+    }
     if (id) {
       await showById(id, "replace");
     } else {
