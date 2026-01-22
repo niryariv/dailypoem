@@ -3,10 +3,10 @@
 // NOTE: Per your choice, the API key is intentionally present in frontend code.
 // You can replace it, or load it differently if you later add a proxy/backend.
 const BEN_YEHUDA_API_KEY = "f456e85106503870c542590768e1b218ed9b5218b178e9157593c6e8dc1f877d";
-const APP_VERSION = "v1.1.0";
+const APP_VERSION = "v1.2.0";
 
 const API_BASE = "https://benyehuda.org";
-const LS_KEY = "shir.state.v1";
+const URL_PARAM_ID = "id";
 
 // Check for debug mode in URL params
 const urlParams = new URLSearchParams(window.location.search);
@@ -24,6 +24,7 @@ const el = {
   status: document.getElementById("status"),
   themeBtn: document.getElementById("themeBtn"),
   installBtn: document.getElementById("installBtn"),
+  shareBtn: document.getElementById("shareBtn"),
 };
 
 /** @typedef {{id:number,title:string,author:string,url:string,snippet?:string,downloadUrl?:string,text?:string}} PoemItem */
@@ -45,61 +46,6 @@ let controlsHideTimer = null;
 let splashHidden = false;
 let installPromptEvent = null;
 
-function safeJsonParse(str) {
-  try {
-    return JSON.parse(str);
-  } catch {
-    return null;
-  }
-}
-
-function loadState() {
-  const raw = localStorage.getItem(LS_KEY);
-  const parsed = raw ? safeJsonParse(raw) : null;
-  if (!parsed || typeof parsed !== "object") return;
-
-  if (parsed.theme === "dark" || parsed.theme === "light") state.theme = parsed.theme;
-  if (Array.isArray(parsed.historyIds)) {
-    state.historyIds = parsed.historyIds.filter((x) => Number.isInteger(x));
-  }
-  if (Number.isInteger(parsed.pointer)) state.pointer = parsed.pointer;
-  if (parsed.itemsById && typeof parsed.itemsById === "object") state.itemsById = parsed.itemsById;
-  if (Array.isArray(parsed.queueIds)) state.queueIds = parsed.queueIds.filter((x) => Number.isInteger(x));
-  if (parsed.searchAfter === null || Array.isArray(parsed.searchAfter)) state.searchAfter = parsed.searchAfter;
-}
-
-function saveState() {
-  // Keep state compact-ish.
-  const maxHistory = 60;
-  if (state.historyIds.length > maxHistory) {
-    const extra = state.historyIds.length - maxHistory;
-    state.historyIds = state.historyIds.slice(extra);
-    state.pointer = Math.max(-1, state.pointer - extra);
-  }
-
-  // Keep a small cache of items (last N).
-  const ids = state.historyIds.slice(-60);
-  const itemsById = {};
-  for (const id of ids) {
-    // Do NOT persist full text into localStorage (too large / can exceed quota).
-    const item = state.itemsById[id];
-    if (!item) continue;
-    const { text, ...rest } = item;
-    itemsById[id] = rest;
-  }
-
-  const payload = {
-    theme: state.theme,
-    historyIds: state.historyIds,
-    pointer: state.pointer,
-    itemsById,
-    queueIds: state.queueIds.slice(0, 80),
-    searchAfter: state.searchAfter,
-  };
-
-  localStorage.setItem(LS_KEY, JSON.stringify(payload));
-}
-
 function setTheme(theme) {
   state.theme = theme;
   el.root.dataset.theme = theme;
@@ -112,7 +58,6 @@ function setTheme(theme) {
   if (el.themeBtn) el.themeBtn.setAttribute("aria-label", nextLabel);
   const metaTheme = document.querySelector('meta[name="theme-color"]');
   if (metaTheme) metaTheme.setAttribute("content", theme === "dark" ? "#0a0a0a" : "#ffffff");
-  saveState();
 }
 
 function showControls() {
@@ -154,6 +99,10 @@ function render(item) {
   el.title.textContent = item.title || "";
   el.author.textContent = item.author || "";
   el.poem.textContent = normalizeText(item.text || item.snippet) || "…";
+  if (el.sourceLink) {
+    el.sourceLink.href = item.url ? new URL(item.url, API_BASE).href : "https://benyehuda.org/";
+  }
+  document.title = item.title ? `${item.title} · שיר` : "שיר";
   // Put focus on content for screen readers (without scrolling).
   el.poem.scrollTop = 0;
 }
@@ -191,8 +140,6 @@ async function ensureFullText(id) {
 
     const fullText = await fetchTextFromUrl(downloadUrl);
     cached.text = normalizeText(fullText);
-    // Persist metadata only (saveState strips `text`).
-    saveState();
     return true;
   } catch (e) {
     if (DEBUG_MODE) console.warn("[FullText] failed", e);
@@ -326,7 +273,6 @@ async function fetchSearchPage() {
   state.searchAfter = page?.next_page_search_after ?? null;
   // If we reached the end, wrap around.
   if (!state.searchAfter) state.searchAfter = null;
-  saveState();
 }
 
 async function ensureQueue(min = 10) {
@@ -369,7 +315,6 @@ async function hydrateItems(ids) {
       snippet: m?.snippet || "",
     };
   }
-  saveState();
 }
 
 function currentId() {
@@ -377,9 +322,55 @@ function currentId() {
   return state.historyIds[state.pointer];
 }
 
-async function showCurrent() {
-  const id = currentId();
-  if (!id) return;
+function getIdFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get(URL_PARAM_ID);
+  const id = raw ? Number(raw) : null;
+  if (!id || !Number.isInteger(id)) return null;
+  return id;
+}
+
+function buildPoemUrl(id) {
+  const url = new URL(window.location.href);
+  url.searchParams.set(URL_PARAM_ID, String(id));
+  return url.toString();
+}
+
+function updateHistoryStack(id, mode = "push") {
+  if (mode === "push") {
+    if (state.pointer < state.historyIds.length - 1) {
+      state.historyIds = state.historyIds.slice(0, state.pointer + 1);
+    }
+    state.historyIds.push(id);
+    state.pointer = state.historyIds.length - 1;
+  } else if (mode === "sync") {
+    const idx = state.historyIds.indexOf(id);
+    if (idx >= 0) {
+      state.pointer = idx;
+    } else {
+      state.historyIds.push(id);
+      state.pointer = state.historyIds.length - 1;
+    }
+  }
+}
+
+function setUrlForPoem(id, mode = "push") {
+  const url = buildPoemUrl(id);
+  if (mode === "replace") {
+    history.replaceState({ id }, "", url);
+  } else if (mode === "push") {
+    history.pushState({ id }, "", url);
+  }
+}
+
+async function showById(id, mode = "sync") {
+  updateHistoryStack(id, mode === "push" ? "push" : "sync");
+  if (mode === "push") {
+    setUrlForPoem(id, "push");
+  } else if (mode === "replace") {
+    setUrlForPoem(id, "replace");
+  }
+
   if (!state.itemsById[id] || !state.itemsById[id].snippet) {
     // Fallback: try the single item endpoint.
     try {
@@ -394,7 +385,6 @@ async function showCurrent() {
         url: m?.url || "",
         snippet: m?.snippet || "",
       };
-      saveState();
     } catch {
       // keep going; we might at least render something cached
     }
@@ -412,14 +402,7 @@ async function showCurrent() {
   });
 }
 
-async function goNext() {
-  if (state.pointer < state.historyIds.length - 1) {
-    state.pointer += 1;
-    saveState();
-    await showCurrent();
-    return;
-  }
-
+async function goNext(mode = "push") {
   try {
     showStatus("טוען…");
     await ensureQueue(12);
@@ -438,29 +421,15 @@ async function goNext() {
     }
     if (!nextId) throw new Error("No candidates");
 
-    state.historyIds.push(nextId);
-    state.pointer = state.historyIds.length - 1;
-    saveState();
-
     // Ensure we have data (snippet usually comes from search already).
     if (!state.itemsById[nextId] || !state.itemsById[nextId].snippet) {
       await hydrateItems([nextId]);
     }
-    await showCurrent();
+    await showById(nextId, mode);
   } catch (e) {
     console.error(e);
     showStatus("לא הצלחתי לטעון (אופליין?)");
   }
-}
-
-async function goPrev() {
-  if (state.pointer <= 0) {
-    showStatus("זה הראשון");
-    return;
-  }
-  state.pointer -= 1;
-  saveState();
-  await showCurrent();
 }
 
 function setupSwipe() {
@@ -506,9 +475,8 @@ function setupSwipe() {
       if (!t) return;
       const dx = t.clientX - startX;
       const dy = t.clientY - startY;
-      if (Math.abs(dy) > thresholdY) return; // vertical scroll gesture
-      if (dx <= -thresholdX) await goNext(); // swipe left => next
-      else if (dx >= thresholdX) await goPrev(); // swipe right => previous
+      if (Math.abs(dx) < thresholdX && Math.abs(dy) < thresholdY) return;
+      await goNext();
     },
     { passive: true }
   );
@@ -518,6 +486,31 @@ function setupButtons() {
   el.themeBtn.addEventListener("click", () => {
     setTheme(state.theme === "dark" ? "light" : "dark");
     showControls();
+  });
+
+  el.shareBtn?.addEventListener("click", async () => {
+    const id = currentId();
+    if (!id) return;
+    const item = state.itemsById[id];
+    const url = buildPoemUrl(id);
+    const title = item?.title || "שיר";
+    const text = item?.author ? `${title} — ${item.author}` : title;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title, text, url });
+        showStatus("שותף");
+        return;
+      }
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+        showStatus("הקישור הועתק");
+      } else {
+        showStatus("אי אפשר לשתף במכשיר הזה");
+      }
+    } catch (e) {
+      if (DEBUG_MODE) console.warn("Share failed", e);
+      showStatus("אי אפשר לשתף במכשיר הזה");
+    }
   });
 
   el.installBtn?.addEventListener("click", async () => {
@@ -545,7 +538,7 @@ function setupButtons() {
     if (x <= edge) {
       void goNext();
     } else if (x >= rect.width - edge) {
-      void goPrev();
+      void goNext();
     } else {
       if (el.root.dataset.controls === "visible") hideControls();
       else showControls();
@@ -554,7 +547,6 @@ function setupButtons() {
 }
 
 async function init() {
-  loadState();
   setTheme(state.theme);
   hideControls();
   setupButtons();
@@ -577,13 +569,11 @@ async function init() {
   const splashDelay = new Promise((resolve) => setTimeout(resolve, 3000));
 
   const loadPoem = (async () => {
-    // If we have a last viewed item cached, render immediately.
-    if (state.historyIds.length && state.pointer >= 0) {
-      await hydrateItems([state.historyIds[state.pointer]]);
-      await showCurrent();
+    const id = getIdFromUrl();
+    if (id) {
+      await showById(id, "replace");
     } else {
-      // First run: fetch one.
-      await goNext();
+      await goNext("replace");
     }
   })().catch((e) => {
     console.error(e);
@@ -591,6 +581,12 @@ async function init() {
 
   await Promise.all([splashDelay, loadPoem]);
   hideSplash();
+
+  window.addEventListener("popstate", () => {
+    const id = getIdFromUrl();
+    if (!id) return;
+    void showById(id, "sync");
+  });
 
   // Register service worker (best-effort).
   if ("serviceWorker" in navigator) {
